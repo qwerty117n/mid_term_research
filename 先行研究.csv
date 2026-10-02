@@ -1,0 +1,6 @@
+題名	Profitabilityファクターの名称	Profitabilityの定義
+The other side of value: The gross profitability premium	GP/A	(売上高-売上原価)/総資産
+Digesting Anomalies: An Investment Approach	ROE (q-factorモデルの収益性ファクター)	四半期特別項目考慮前利益/１四半期前の簿価株主資本
+A five-factor asset pricing model	RMW (robust minus weak)	(売上高-売上原価-販管費-支払利息)÷簿価株主資本
+Deflating profitability	Operating Profitability　(OP)	(売上-売上原価-(販管費-R&D))÷総資産
+Accruals, cash flows, and operating profitability in the cross section of stock returns	Cash-based Operating Profitability (CbOP)	(OP-Δ運転資本)÷総資産(t-1期)
