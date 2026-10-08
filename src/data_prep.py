@@ -17,7 +17,9 @@ USE_COLUMNS = [
 
 
 def load_quarterly(path=config.INPUT_CSV) -> pd.DataFrame:
-    df = pd.read_csv(path, encoding="utf-8-sig", usecols=USE_COLUMNS)
+    # NRI_CODE（例：A1766）・証券コード（例：130A）は英字を含みうるため、文字列で読み込む
+    df = pd.read_csv(path, encoding="utf-8-sig", usecols=USE_COLUMNS,
+                     dtype={"NRI_CODE": str, "証券コード": str})
     df["当期決算年月日"] = pd.to_datetime(df["当期決算年月日"])
     df["公表日"] = pd.to_datetime(df["公表日"])
     n0 = len(df)

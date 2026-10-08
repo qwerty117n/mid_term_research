@@ -101,6 +101,10 @@ def main():
             if i % 50 == 0:
                 print(f"[run] {i:,}/{len(tasks):,} 社 完了（{time.time() - t_start:.0f} 秒）")
 
+    if not rows:
+        print(f"[run] 推定できた企業がありません。各社の観測数（{config.MIN_WINDOW_QUARTERS} 四半期以上）"
+              f"と、業種シグナル（1業種 {config.MIN_INDUSTRY_FIRMS} 社以上）を確認してください。")
+        return
     params = pd.DataFrame(params)
     quarterly = pd.DataFrame(rows)
     params.to_csv(args.output / "parameters.csv", index=False, encoding="utf-8-sig")

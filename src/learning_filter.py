@@ -29,11 +29,22 @@
   ・欠けた四半期：観測による更新を行わず、平均回帰（予測ステップ）だけ進める
 """
 
+import zlib
+
 import numpy as np
 import pandas as pd
 
 import config
 import smm
+
+
+def firm_seed(firm, j):
+    """
+    企業・推定時点ごとの乱数シード。
+    NRI_CODE には英字を含むもの（例：A1766）があるため、文字列から計算する。
+    hash() は実行ごとに値が変わるため使わず、crc32 で毎回同じ値になるようにする。
+    """
+    return config.RANDOM_SEED + zlib.crc32(str(firm).encode("utf-8")) * 1000 + j
 
 
 def expected_profitability(x, mu_hat, mu_bar, lam, kap, tau=config.HORIZON):
@@ -131,7 +142,7 @@ def process_firm(args):
     params, rows = [], []
     mu_hat0 = None
     for j, k in enumerate(est_points):
-        p = smm.estimate(x[: k + 1], s[: k + 1], seed=config.RANDOM_SEED + int(firm) * 1000 + j)
+        p = smm.estimate(x[: k + 1], s[: k + 1], seed=firm_seed(firm, j))
         if p is None:
             continue
         if mu_hat0 is None:
