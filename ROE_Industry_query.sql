@@ -17,7 +17,28 @@ WITH AT_RawData AS
                 8
             ),
             112 -- 日付形式であることの明示
-        ) AS 決算年月日
+        ) AS 決算年月日,
+
+        A.[ANNOUNCE],
+        A.[RCVD],
+
+        /*
+          決算発表日・決算短信入手日（YYYYMMDD）をdate型に変換
+          FDATEと同じ方法で変換し、0や欠損値コードなど日付にならない値はNULLとなる
+        */
+        TRY_CONVERT
+        (
+            date,
+            RIGHT('00000000' + CONVERT(varchar(8), A.[ANNOUNCE]), 8),
+            112
+        ) AS 決算発表日,
+
+        TRY_CONVERT
+        (
+            date,
+            RIGHT('00000000' + CONVERT(varchar(8), A.[RCVD]), 8),
+            112
+        ) AS 決算短信入手日
 
     FROM [IDSQE].[dbo].[NRIFIN_CON_AT4] AS A
 ),
@@ -32,6 +53,27 @@ AT_Data AS
         A.[FDATE],
         A.[NMONTH],
         A.決算年月日,
+        A.決算発表日,
+        A.決算短信入手日,
+
+        /*
+          公表日（投資家が決算情報を利用可能になった日）
+          Hou and Sinagl (2025) の RDQ（reporting date）に対応する。
+          ・決算発表日を優先し、欠損の場合は決算短信入手日で補う
+          ・決算日より前の日付は誤りとみなしてNULLとする
+          Python側では、この日以降に当該四半期のROEが観測可能になったとして扱う
+        */
+        CASE
+            WHEN A.決算発表日 >= A.決算年月日 THEN A.決算発表日
+            WHEN A.決算短信入手日 >= A.決算年月日 THEN A.決算短信入手日
+            ELSE NULL
+        END AS 公表日,
+
+        CASE
+            WHEN A.決算発表日 >= A.決算年月日 THEN N'決算発表日'
+            WHEN A.決算短信入手日 >= A.決算年月日 THEN N'決算短信入手日'
+            ELSE NULL
+        END AS 公表日の出所,
 
         /*
           会計年度開始日を計算
@@ -85,7 +127,13 @@ PL_BaseData AS
         A.[FDATE],
         A.決算年月日,
         A.[NMONTH] AS 決算月数,
-        A.会計年度開始日
+        A.会計年度開始日,
+
+        -- 当期決算の公表日（ROEが観測可能になる日）
+        A.決算発表日,
+        A.決算短信入手日,
+        A.公表日,
+        A.公表日の出所
 
     FROM [IDSQE].[dbo].[NRIFIN_CON_PL4] AS P
 
@@ -168,6 +216,10 @@ PL_Data AS
         四半期番号,
         会計基準,
         累積当期純利益,
+        決算発表日,
+        決算短信入手日,
+        公表日,
+        公表日の出所,
 
         -- 差分を用いて単独利益を計算
         CASE 本中区分
@@ -310,6 +362,16 @@ ROE_Data AS
         PL.四半期単独当期純利益 AS profit_t,
         PL.前四半期末日,
 
+        /*
+          当期決算の公表日
+          分母（前四半期末のB/S）はそれ以前に公表済みなので、
+          ROEが観測可能になる日は当期決算の公表日で決まる
+        */
+        PL.決算発表日,
+        PL.決算短信入手日,
+        PL.公表日,
+        PL.公表日の出所,
+
         -- 前四半期のB/Sデータ項目
         BS.決算期 AS 前期決算期,
         BS.決算年 AS 前期決算年,
@@ -414,6 +476,13 @@ SELECT
     R.当期決算期,
     R.当期決算年,
     R.当期決算年月日,
+
+    -- 公表日（Python側で、月末時点で観測可能なROEを判定するために使用）
+    R.公表日,
+    R.公表日の出所,
+    R.決算発表日,
+    R.決算短信入手日,
+
     R.当期決算月数,
     R.会計年度開始日,
     R.本中区分,
