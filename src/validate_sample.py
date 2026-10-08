@@ -25,9 +25,11 @@ def main():
     ap.add_argument("--output", type=Path, default=config.OUTPUT_DIR)
     args = ap.parse_args()
 
-    params = pd.read_csv(args.output / "parameters.csv", encoding="utf-8-sig")
-    quarterly = pd.read_csv(args.output / "quarterly_results.csv", encoding="utf-8-sig")
-    true = pd.read_csv(TRUE_PARAMS, encoding="utf-8-sig")
+    # NRI_CODE は英字を含みうるため、すべて文字列で読み込んでから結合する
+    codes = {"NRI_CODE": str}
+    params = pd.read_csv(args.output / "parameters.csv", encoding="utf-8-sig", dtype=codes)
+    quarterly = pd.read_csv(args.output / "quarterly_results.csv", encoding="utf-8-sig", dtype=codes)
+    true = pd.read_csv(TRUE_PARAMS, encoding="utf-8-sig", dtype=codes)
     lines = []
 
     # ===== 1. パラメータの答え合わせ（企業ごとの最新の推定値） =====
