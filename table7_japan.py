@@ -29,12 +29,13 @@ def nw_mean(x, nw_lags=12):
 
 
 # ---------- 1段目：将来収益性予測 ----------
-def first_stage(ch, y, inv, xvars='full'):
+def first_stage(ch, y, inv, xvars='full', winsor_dep=False):
     """
     各年: Y_τ を X_{τ-1} に回帰。返り値 B の index は est_year = τ
     （Y_τ が判明する形成年。τ 年 6 月には推定可能）
     xvars='full': Y, ΔY, lnBM, lnME, 投資（論文の式(5)）
     xvars='prof': Y, ΔY のみ（B/M の効果を拾っていないかの確認用）
+    winsor_dep: 被説明変数 Y_τ も年ごとに winsorize（論文からの変更。CP の外れ値対策）
     """
     X_cols = [y, f'd{y}', 'lnBM', 'lnME', inv] if xvars == 'full' else [y, f'd{y}']
     base = ch[['stock_id', 'fiscal_year_end_yyyymm'] + X_cols].dropna().copy()
@@ -46,6 +47,8 @@ def first_stage(ch, y, inv, xvars='full'):
     lead = lead.rename(columns={y: 'y_lead', 'form_year': 'est_year'})
     lead['fiscal_year_end_yyyymm'] -= 100
     pair = base.merge(lead, on=['stock_id', 'fiscal_year_end_yyyymm'], how='inner')
+    if winsor_dep:
+        pair = winsorize_by(pair, ['y_lead'], by='est_year')
 
     rows = []
     for t, g in pair.groupby('est_year'):
@@ -74,15 +77,15 @@ def first_stage_summary(B, nw_lags=2):
     return pd.Series(out)
 
 
-def add_expected(ch, y, inv, xvars='full', timing='safe', avg_years=1):
+def add_expected(ch, y, inv, xvars='full', timing='safe', avg_years=1, winsor_dep=False):
     """
     期待収益性 Yhat を作成
     timing='safe' : b_τ（τ 年 6 月に既知）× X_τ → τ 年 7 月からのリターンに使用
     timing='paper': b_{τ+1} × X_τ → τ+1 年 7 月からのリターンに使用（論文 p.19 の記述）
     avg_years: 直近何年分の係数を平均して使うか（1 = 最新年のみ）
     """
-    B, X_cols = first_stage(ch, y, inv, xvars)
-    Bs = (B[['const'] + X_cols].rolling(avg_years, min_periods=1).mean()
+    B, X_cols = first_stage(ch, y, inv, xvars, winsor_dep)
+    Bs =(B[['const'] + X_cols].rolling(avg_years, min_periods=1).mean()
           .add_prefix('b_'))
 
     base = ch[['security_code', 'fiscal_year_end_yyyymm', 'form_year'] + X_cols].dropna().copy()
@@ -139,12 +142,12 @@ def iqr_return(s, C, var):
 
 
 def table7(ch, rt, universe_mask=None, weight=None, xvars='full',
-           timing='safe', avg_years=1, nw_lags=12):
+           timing='safe', avg_years=1, winsor_dep=False, nw_lags=12):
     row_order = ['Y_t', 'Yhat', 'lnBM', 'lnME', 'inv', 'R1_1', 'R2_12',
                  'Avg. Adj-R2', 'Avg. N', 'Months', 'IQR ret', 'IQR diff (3)-(1)']
     res, store = {}, {}
     for y, inv in PROF.items():
-        yhat, B = add_expected(ch, y, inv, xvars, timing, avg_years)
+        yhat, B = add_expected(ch, y, inv, xvars, timing, avg_years, winsor_dep)
         s = build_sample7(ch, rt, y, inv, yhat, universe_mask)
         rename = {y: 'Y_t', inv: 'inv'}
         Cs = {}
@@ -175,6 +178,15 @@ for y, inv in PROF.items():
     print(f'===== {y} =====')
     display(first_stage_summary(B).to_frame('avg (t)'))
 
+# CP の外れ値チェック：年別係数と分布
+B_cp, _ = first_stage(ch, 'CP', 'dB')
+display(B_cp.round(3))
+print(ch['CP'].describe(percentiles=[.001, .01, .5, .99, .999]))
+
+# 被説明変数も winsorize した場合の 1段目（CP が安定するか）
+B_cp_w, _ = first_stage(ch, 'CP', 'dB', winsor_dep=True)
+display(first_stage_summary(B_cp_w).to_frame('CP, winsor_dep=True'))
+
 
 # %% セルC：Table 7 メイン（全銘柄・等加重・timing='safe'）
 panel7_a, store7_a = table7(ch, rt)
@@ -203,3 +215,11 @@ display(panel7_prof)
 # 論文どおりのタイミング
 panel7_paper, _ = table7(ch, rt, timing='paper')
 display(panel7_paper)
+
+# 1段目の被説明変数も winsorize（CP の外れ値対策）
+panel7_wd, _ = table7(ch, rt, winsor_dep=True)
+display(panel7_wd)
+
+# 1段目係数を直近3年平均で安定化
+panel7_avg3, _ = table7(ch, rt, avg_years=3)
+display(panel7_avg3)
