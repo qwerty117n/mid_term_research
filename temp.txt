@@ -15,5 +15,5 @@ for y, inv in [('CBOP', 'dA'), ('CP', 'dB')]:
     for name, var in cands:
         rmw, _ = two_by_three(sig, rtw, var)
         est, _ = ts_reg(rmw, F[['MKT', 'SMB', 'HML', 'CMA']])
-        print(f'{name:16s} 平均 {rmw.mean()*100:.2coef"]*100:.2f} '
+        print(f'{name:16s} 平均 {rmw.mean()*100:.2f} | FF4 α {est.loc["alpha","coef"]*100:.2f} '
               f'(t={est.loc["alpha","t"]:.2f})')
