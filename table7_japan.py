@@ -12,6 +12,18 @@ CTRL = ['lnBM', 'lnME', 'R1_1', 'R2_12']
 PROF = {'CBOP': 'dA', 'CP': 'dB'}
 
 
+def show(title, obj=None, note=None):
+    """表の前に見出しと説明を表示"""
+    print('\n' + '=' * 80)
+    print('■ ' + title)
+    if note:
+        for line in note.strip().split('\n'):
+            print('  ' + line.strip())
+    print('=' * 80)
+    if obj is not None:
+        display(obj)
+
+
 def winsorize_by(df, cols, by='form_year', p=0.01):
     for c in cols:
         g = df.groupby(by)[c]
@@ -175,51 +187,61 @@ def table7(ch, rt, universe_mask=None, weight=None, xvars='full',
 # %% セルB：1段目の確認（Table 1 の列(3)相当）
 for y, inv in PROF.items():
     B, _ = first_stage(ch, y, inv, xvars='full')
-    print(f'===== {y} =====')
-    display(first_stage_summary(B).to_frame('avg (t)'))
+    show(f'[1段目] 将来収益性の予測回帰：{y}（Table 1 列(3)相当）',
+         first_stage_summary(B).to_frame('平均係数 (t値)'),
+         note='Y_{t+1} を Y_t, ΔY_t, ln(B/M), ln(ME), 投資 に年次クロスセクション回帰した係数の平均。\n'
+              'ΔY_t が負なら「収益性は平均回帰する」。')
 
-# CP の外れ値チェック：年別係数と分布
 B_cp, _ = first_stage(ch, 'CP', 'dB')
-display(B_cp.round(3))
-print(ch['CP'].describe(percentiles=[.001, .01, .5, .99, .999]))
+show('[1段目] CP の年別係数（外れ値の年がないかの確認）', B_cp.round(3),
+     note='特定の年だけ係数が極端に大きい・小さい場合は、被説明変数の外れ値が疑われる。')
 
-# 被説明変数も winsorize した場合の 1段目（CP が安定するか）
+show('[1段目] CP の分布（裾の長さの確認）',
+     ch['CP'].describe(percentiles=[.001, .01, .5, .99, .999]).to_frame('CP'),
+     note='0.1% 点・99.9% 点が中央値から極端に離れていれば、外れ値の影響が大きい。')
+
 B_cp_w, _ = first_stage(ch, 'CP', 'dB', winsor_dep=True)
-display(first_stage_summary(B_cp_w).to_frame('CP, winsor_dep=True'))
+show('[1段目] CP：被説明変数も winsorize した場合（winsor_dep=True）',
+     first_stage_summary(B_cp_w).to_frame('平均係数 (t値)'),
+     note='上の CP の結果より t 値が上がり安定すれば、CP の不安定さは外れ値が原因。')
 
 
 # %% セルC：Table 7 メイン（全銘柄・等加重・timing='safe'）
 panel7_a, store7_a = table7(ch, rt)
-display(panel7_a)
+show('[Table 7 メイン] 全銘柄・等ウェイト', panel7_a,
+     note='月次リターンの Fama-MacBeth 回帰。係数×100、括弧内は Newey-West t 値（絶対値）。\n'
+          '列(1)：現在の収益性 Y_t のみ ／ 列(2)：Y_t と期待収益性 Ŷ の両方 ／ 列(3)：Ŷ のみ。\n'
+          '列(3)の Ŷ が列(1)の Y_t より大きく有意なら H1 を支持。列(2)で Ŷ が残れば H2 を支持。')
 
-# Ŷ と Y_t の分布・相関
 for y in PROF:
     s = store7_a[y]['sample'].drop_duplicates(['security_code', 'form_year'])
-    print(y, 'corr(Y, Yhat) =', round(s[[y, 'Yhat']].corr().iloc[0, 1], 3))
-    display(s[[y, 'Yhat']].describe().T)
+    show(f'[Table 7 補足] {y}：Y_t と Ŷ の分布', s[[y, 'Yhat']].describe().T,
+         note=f'corr(Y_t, Ŷ) = {s[[y, "Yhat"]].corr().iloc[0, 1]:.3f}\n'
+              'Ŷ は予測値なので Y_t より散らばりが小さいのが普通。')
 
 
 # %% セルD：頑健性
-# Panel B：マイクロキャップ除外（暫定基準。市場区分データ取得後に差し替え）
 panel7_b, _ = table7(ch, rt, universe_mask=lambda s: pd.Series(True, index=s.index))
-display(panel7_b)
+show('[頑健性] Panel B：マイクロキャップ除外・等ウェイト', panel7_b,
+     note='毎年6月の時価総額が下位20%の銘柄を除外（暫定基準：全銘柄の20パーセンタイル）。\n'
+          '結果が残れば、極小型株だけの現象ではない。')
 
-# 時価総額加重（Table 8 相当）
 panel7_vw, _ = table7(ch, rt, weight='ME_jun')
-display(panel7_vw)
+show('[頑健性] 時価総額加重（Table 8 相当）', panel7_vw,
+     note='6月末時価総額をウェイトにした回帰。大型株の影響が大きくなる。')
 
-# 収益性のみで作った Ŷ（規模・投資・B/M の情報を除いた確認用）
 panel7_prof, _ = table7(ch, rt, xvars='prof')
-display(panel7_prof)
+show('[頑健性] Ŷ を Y_t と ΔY_t だけで作った場合（xvars="prof"）', panel7_prof,
+     note='規模・投資・B/M の情報を除いた Ŷ。結果が残れば、改善の源は収益性の平均回帰。')
 
-# 論文どおりのタイミング
 panel7_paper, _ = table7(ch, rt, timing='paper')
-display(panel7_paper)
+show('[頑健性] 論文どおりのタイミング（timing="paper"）', panel7_paper,
+     note='翌年の係数を使い、1年後のリターンに適用（論文 p.19 の記述）。メインは先読みのない "safe"。')
 
-# 1段目の被説明変数も winsorize（CP の外れ値対策）
 panel7_wd, _ = table7(ch, rt, winsor_dep=True)
-display(panel7_wd)
+show('[頑健性] 1段目の被説明変数も winsorize（winsor_dep=True）', panel7_wd,
+     note='CP の外れ値対策。論文からの変更点。')
 
-# 1段目係数を直近3年平均で安定化
 panel7_avg3, _ = table7(ch, rt, avg_years=3)
-display(panel7_avg3)
+show('[頑健性] 1段目の係数を直近3年平均（avg_years=3）', panel7_avg3,
+     note='予測式の係数のぶれをならした場合。')
