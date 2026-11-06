@@ -1,24 +1,3 @@
-for y, inv in [('CBOP', 'dA'), ('CP', 'dB')]:
-    sig = build_signals(ch, y, inv)
-    yp, _ = add_expected(ch, y, inv, xvars='prof')                      # 収益性だけで作った Ŷ
-    sig = sig.merge(yp.rename(columns={'Yhat': 'Yhat_prof'}), on=['security_code', 'form_year'], how='inner')
-    if y == 'CP':
-        yw, _ = add_expected(ch, y, inv, winsor_dep=True)              # CP の外れ値対策
-        sig = sig.merge(yw.rename(columns={'Yhat': 'Yhat_wd'}), on=['security_code', 'form_year'], how='inner')
-    sig[f'{y}_avg3'] = sig[[y, f'{y}_lag1', f'{y}_lag2']].mean(axis=1, skipna=False)
-    sig = sig.dropna(subset=[f'{y}_avg3', 'Yhat_prof'])
-
-    cands = [('Y_t', y), ('B：3年平均', f'{y}_avg3'), ('Ŷ（収益性のみ）', 'Yhat_prof'), ('Ŷ（フル）', 'Yhat')]
-    if y == 'CP':
-        cands.append(('Ŷ（winsor_dep）', 'Yhat_wd'))
-    print(f'===== {y} =====')
-    for name, var in cands:
-        rmw, _ = two_by_three(sig, rtw, var)
-        est, _ = ts_reg(rmw, F[['MKT', 'SMB', 'HML', 'CMA']])
-        print(f'{name:16s} 平均 {rmw.mean()*100:.2f} | FF4 α {est.loc["alpha","coef"]*100:.2f} '
-              f'(t={est.loc["alpha","t"]:.2f})')
-
-
 def first_stage(ch, y, inv, xvars='full', winsor_dep=False):
     """
     年ごとに Y_τ を X_{τ-1} に回帰する。返り値 B の index は est_year = τ
