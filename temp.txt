@@ -1,0 +1,17 @@
+for y, inv in [('CBOP', 'dA'), ('CP', 'dB')]:
+    sig = build_signals(ch, y, inv)                                    # Ŷ（係数は最新1年）
+    yhat3, _ = add_expected(ch, y, inv, avg_years=3)                   # Ŷ（係数は3年平均）＝ A
+    sig = sig.merge(yhat3.rename(columns={'Yhat': 'Yhat_avg3coef'}),
+                    on=['security_code', 'form_year'], how='inner')
+    sig[f'{y}_avg3'] = sig[[y, f'{y}_lag1', f'{y}_lag2']].mean(axis=1, skipna=False)  # B
+    sig = sig.dropna(subset=[f'{y}_avg3', 'Yhat_avg3coef'])           # 4種類すべてがそろう銘柄
+
+    print(f'===== {y} =====')
+    for name, var in [('Y_t', y),
+                      ('B：収益性の3年平均', f'{y}_avg3'),
+                      ('Ŷ（係数1年）', 'Yhat'),
+                      ('A：Ŷ（係数3年平均）', 'Yhat_avg3coef')]:
+        rmw, _ = two_by_three(sig, rtw, var)
+        est, _ = ts_reg(rmw, F[['MKT', 'SMB', 'HML', 'CMA']])
+        print(f'{name:18s} 平均 {rmw.mean()*100:.2f} | FF4 α {est.loc["alpha","coef"]*100:.2f} '
+              f'(t={est.loc["alpha","t"]:.2f})')
