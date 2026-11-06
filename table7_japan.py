@@ -34,7 +34,7 @@ def first_stage(ch, y, inv, xvars='full', winsor_dep=False):
     各年: Y_τ を X_{τ-1} に回帰。返り値 B の index は est_year = τ
     （Y_τ が判明する形成年。τ 年 6 月には推定可能）
     xvars='full': Y, ΔY, lnBM, lnME, 投資（論文の式(5)）
-    xvars='prof': Y, ΔY のみ（B/M の効果を拾っていないかの確認用）
+    xvars='prof': Y, ΔY のみ（規模・投資・B/M の情報を除いた確認用）
     winsor_dep: 被説明変数 Y_τ も年ごとに winsorize（論文からの変更。CP の外れ値対策）
     """
     X_cols = [y, f'd{y}', 'lnBM', 'lnME', inv] if xvars == 'full' else [y, f'd{y}']
@@ -85,7 +85,7 @@ def add_expected(ch, y, inv, xvars='full', timing='safe', avg_years=1, winsor_de
     avg_years: 直近何年分の係数を平均して使うか（1 = 最新年のみ）
     """
     B, X_cols = first_stage(ch, y, inv, xvars, winsor_dep)
-    Bs =(B[['const'] + X_cols].rolling(avg_years, min_periods=1).mean()
+    Bs = (B[['const'] + X_cols].rolling(avg_years, min_periods=1).mean()
           .add_prefix('b_'))
 
     base = ch[['security_code', 'fiscal_year_end_yyyymm', 'form_year'] + X_cols].dropna().copy()
@@ -172,7 +172,7 @@ def table7(ch, rt, universe_mask=None, weight=None, xvars='full',
     return table, store
 
 
-# %% セルB：1段目の確認（Table 1 の列(3)相当。既存の自己回帰結果と比較）
+# %% セルB：1段目の確認（Table 1 の列(3)相当）
 for y, inv in PROF.items():
     B, _ = first_stage(ch, y, inv, xvars='full')
     print(f'===== {y} =====')
@@ -208,7 +208,7 @@ display(panel7_b)
 panel7_vw, _ = table7(ch, rt, weight='ME_jun')
 display(panel7_vw)
 
-# 収益性のみで作った Ŷ（B/M の効果を拾っていないかの確認）
+# 収益性のみで作った Ŷ（規模・投資・B/M の情報を除いた確認用）
 panel7_prof, _ = table7(ch, rt, xvars='prof')
 display(panel7_prof)
 
