@@ -17,3 +17,54 @@ for y, inv in [('CBOP', 'dA'), ('CP', 'dB')]:
         est, _ = ts_reg(rmw, F[['MKT', 'SMB', 'HML', 'CMA']])
         print(f'{name:16s} 平均 {rmw.mean()*100:.2f} | FF4 α {est.loc["alpha","coef"]*100:.2f} '
               f'(t={est.loc["alpha","t"]:.2f})')
+
+
+def first_stage(ch, y, inv, xvars='full', winsor_dep=False):
+    """
+    年ごとに Y_τ を X_{τ-1} に回帰する。返り値 B の index は est_year = τ
+    xvars='full'：Y, ΔY, lnBM, lnME, 投資　／　'prof'：Y, ΔY のみ
+    winsor_dep：被説明変数 Y_τ も年ごとに winsorize する（論文からの変更。CP の外れ値対策）
+    """
+    X_cols = [y, f'd{y}', 'lnBM', 'lnME', inv] if xvars == 'full' else [y, f'd{y}']
+    base = ch[['stock_id', 'fiscal_year_end_yyyymm'] + X_cols].dropna().copy()
+    base['_fy'] = base['fiscal_year_end_yyyymm'] // 100
+    base = winsorize_by(base, X_cols, by='_fy')
+
+    lead = ch[['stock_id', 'fiscal_year_end_yyyymm', 'form_year', y]].dropna().copy()
+    lead = lead.rename(columns={y: 'y_lead', 'form_year': 'est_year'})
+    lead['fiscal_year_end_yyyymm'] -= 100
+    pair = base.merge(lead, on=['stock_id', 'fiscal_year_end_yyyymm'], how='inner')
+    if winsor_dep:
+        pair = winsorize_by(pair, ['y_lead'], by='est_year')
+
+    rows = []
+    for t, g in pair.groupby('est_year'):
+        X = np.column_stack([np.ones(len(g)), g[X_cols].to_numpy(float)])
+        yv = g['y_lead'].to_numpy(float)
+        n, k = X.shape
+        if n < k + 10:
+            continue
+        b, *_ = np.linalg.lstsq(X, yv, rcond=None)
+        e = yv - X @ b
+        adj_r2 = 1 - (e @ e / (n - k)) / yv.var(dd
+        rows.append({'est_year': t, 'const': b[0], **dict(zip(X_cols, b[1:])),
+                     'adj_r2': adj_r2, 'n': n})
+    return pd.DataFrame(rows).set_index('est_year').sort_index(), X_cols
+
+
+def add_expected(ch, y, inv, xvars='full', timing=ep=False):
+    """期待収益性 Yhat を作る（timing='safe'：b_τ × X_τ を τ 年7月からのリターンに使う）"""
+    B, X_cols = first_stage(ch, y, inv, xvars, win
+    Bs = (B[['const'] + X_cols].rolling(avg_years, min_periods=1).mean()
+          .add_prefix('b_'))
+
+    base = ch[['security_code', 'fiscal_year_end_y].dropna().copy()
+    base['_fy'] = base['fiscal_year_end_yyyymm'] // 100
+    base = winsorize_by(base, X_cols, by='_fy')
+    shift = 0 if timing == 'safe' else 1
+    base['coef_year'] = base['form_year'] + shift
+    base = base.merge(Bs, left_on='coef_year', right_index=True, how='inner')
+    base['Yhat'] = base['b_const'] + sum(base[f'b_ls)
+
+    out = base[['security_code', 'coef_year', 'Yhaar': 'form_year'})
+    return out, B
