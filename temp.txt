@@ -1,4 +1,19 @@
-# %% 2×3 ソートの分解：小型株の群・大型株の群それぞれの「高 − 低」
+# %% [markdown]
+# 追加分析：2×3 ソートの規模別分解（効果が中小型株に集中しているか）
+# 前提（ノートブック上で定義・実行済み）:
+#   - rmw_yhat_japan.py のセル A〜D
+#     （関数 assign_bins, vw_ret, ts_reg, align_to_ff, period_info, show, FACTOR_SETS、
+#       変数 sigs, rtw, FF, own, MODEL, PROF）
+# 各 "# %%" ごとにノートブックのセルへ貼り付けて実行する
+
+# %% 追加分析セルA：関数定義
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+SIGNALS = {'exp': 'Yhat', 'expprof': 'Yhat_prof', 'act': None}   # None は実績 Y_t
+
+
 def rmw_legs(sig, rtw, var, bp_mask=None):
     """2×3 ソートの、小型株の群と大型株の群それぞれのスプレッド（高 − 低）を返す"""
     s = sig.dropna(subset=[var, 'ME_jun']).copy()
@@ -11,18 +26,18 @@ def rmw_legs(sig, rtw, var, bp_mask=None):
     return pd.DataFrame({'small': R[(0, 2)] - R[(0, 0)], 'big': R[(1, 2)] - R[(1, 0)]})
 
 
-SIGNALS = {'exp': 'Yhat', 'expprof': 'Yhat_prof', 'act': None}   # None は実績 Y_t
+def build_legs(sigs, rtw, FF, bp_mask=None):
+    """全シグナル・全収益性指標の小型・大型スプレッドを作り、French と共通の月にそろえる"""
+    legs = {}
+    for y in sigs:
+        for lab, var in SIGNALS.items():
+            L = rmw_legs(sigs[y], rtw, var or y, bp_mask)
+            legs[f'{lab}{y}_small'] = L['small']
+            legs[f'{lab}{y}_big'] = L['big']
+    return align_to_ff(pd.DataFrame(legs), FF)
 
-legs = {}
-for y in PROF:
-    for lab, var in SIGNALS.items():
-        L = rmw_legs(sigs[y], rtw, var or y)
-        legs[f'{lab}{y}_small'] = L['small']
-        legs[f'{lab}{y}_big'] = L['big']
-legs = align_to_ff(pd.DataFrame(legs), FF)    # French と共通の月にそろえる
 
-
-def leg_table(legs, FF, y, model='ff5', nw_lags=12
+def leg_table(legs, FF, y, model='ff5', nw_lags=12):
     """各シグナルについて、小型・大型それぞれの平均と α、および「小型 − 大型」の差の検定"""
     base = FACTOR_SETS[model]
     fmt = lambda e: f"{e.loc['alpha', 'coef'] * 100:.3f} ({e.loc['alpha', 't']:.2f})"
@@ -32,32 +47,42 @@ def leg_table(legs, FF, y, model='ff5', nw_lags=12
             x = legs[f'{lab}{y}_{g}']
             m, _, n = ts_reg(x, None, nw_lags)
             a, _, _ = ts_reg(x, FF[base], nw_lags)
-            rows[(lab, g)] = {'平均 (%/月)': fmt(m': fmt(a), '月数': n}
+            rows[(lab, g)] = {'平均 (%/月)': fmt(m), f'{model.upper()} α (%/月)': fmt(a), '月数': n}
         d = legs[f'{lab}{y}_small'] - legs[f'{lab}{y}_big']
         m, _, n = ts_reg(d, None, nw_lags)
         a, _, _ = ts_reg(d, FF[base], nw_lags)
-        rows[(lab, '小型 − 大型')] = {'平均 (%/月)α (%/月)': fmt(a), '月数': n}
+        rows[(lab, '小型 − 大型')] = {'平均 (%/月)': fmt(m), f'{model.upper()} α (%/月)': fmt(a), '月数': n}
     return pd.DataFrame(rows).T
 
 
+def plot_legs(legs, ys):
+    """期待版と実績版の、小型・大型それぞれの累積リターン"""
+    fig, axes = plt.subplots(1, len(ys), figsize=(7 * len(ys), 4.5), squeeze=False)
+    for j, y in enumerate(ys):
+        for lab, col in [('exp', 'tab:blue'), ('act', 'tab:orange')]:
+            for g, ls in [('small', '-'), ('big', '--')]:
+                cum = (1 + legs[f'{lab}{y}_{g}']).cumprod()
+                axes[0, j].plot(cum.index.to_timestamp(), cum.to_numpy(), color=col, ls=ls, label=f'{lab} {g}')
+        axes[0, j].set_yscale('log')
+        axes[0, j].axhline(1, color='gray', lw=0.8)
+        axes[0, j].set_title(f'{y}: high-minus-low within size group\n({legs.index.min()} - {legs.index.max()})')
+        axes[0, j].legend()
+    fig.tight_layout()
+    plt.show()
+
+
+# %% 追加分析セルB：実行
+legs = build_legs(sigs, rtw, FF)
+
 for y in PROF:
     # 確認：RMW = ½ × 小型 + ½ × 大型 になっているか（0 に近ければ OK）
-    chk = (0.5 * (legs[f'exp{y}_small'] + legs[f'ey}'].reindex(legs.index)).abs().max()
-    show(f'[規模別の分解] {y}（{MODEL.upper()}）', leg_table(legs, FF, y, MODEL),
-         note=f'期間：{period_info(legs)}。括弧内
+    chk = (0.5 * (legs[f'exp{y}_small'] + legs[f'exp{y}_big'])
+           - own[f'RMW_exp{y}'].reindex(legs.index)).abs().max()
+    show(f'[追加分析：規模別の分解] {y}（{MODEL.upper()}）', leg_table(legs, FF, y, MODEL),
+         note=f'期間：{period_info(legs)}。括弧内は Newey-West t値。\n'
               'small：小型株の群の中での「収益性が高い − 低い」、big：大型株の群の中での同じスプレッド。\n'
-              '「小型 − 大型」の α が有意なら、効  α が有意なら、大型株でも効果がある。\n'
+              '「小型 − 大型」の α が有意なら、効果は小型株に偏っている。big の α が有意なら、大型株でも効果がある。\n'
+              '小型・大型は各年の全銘柄の時価総額中央値で分割（大型株の群には中型株も含まれる）。\n'
               f'（確認：RMW_exp{y} と ½(small + big) の最大の差 = {chk:.2e}）')
 
-# 図：期待版と実績版の、小型・大型それぞれの累積リターン
-fig, axes = plt.subplots(1, len(PROF), figsize=(14
-for j, y in enumerate(PROF):
-    for lab, col in [('exp', 'tab:blue'), ('act',
-        for g, ls in [('small', '-'), ('big', '--')]:
-            cum = (1 + legs[f'{lab}{y}_{g}']).cump
-            axes[0, j].plot(cum.index.to_timestamp(), cum.to_numpy(), color=col, ls=ls, label=f'{lab} {g}')
-    axes[0, j].set_yscale('log')
-    axes[0, j].axhline(1, color='gray', lw=0.8)
-    axes[0, j].set_title(f'{y}: high-minus-low witmin()} - {legs.index.max()})')
-    axes[0, j].legend()
-fig.tight_layout(); plt.show()
+plot_legs(legs, list(PROF))
