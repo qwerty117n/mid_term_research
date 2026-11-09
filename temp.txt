@@ -1,49 +1,63 @@
-def first_stage(ch, y, inv, xvars='full', winsor_dep=False):
-    """
-    年ごとに Y_τ を X_{τ-1} に回帰する。返り値 B の index は est_year = τ
-    xvars='full'：Y, ΔY, lnBM, lnME, 投資　／　'prof'：Y, ΔY のみ
-    winsor_dep：被説明変数 Y_τ も年ごとに winsorize する（論文からの変更。CP の外れ値対策）
-    """
-    X_cols = [y, f'd{y}', 'lnBM', 'lnME', inv] if xvars == 'full' else [y, f'd{y}']
-    base = ch[['stock_id', 'fiscal_year_end_yyyymm'] + X_cols].dropna().copy()
-    base['_fy'] = base['fiscal_year_end_yyyymm'] // 100
-    base = winsorize_by(base, X_cols, by='_fy')
-
-    lead = ch[['stock_id', 'fiscal_year_end_yyyymm', 'form_year', y]].dropna().copy()
-    lead = lead.rename(columns={y: 'y_lead', 'form_year': 'est_year'})
-    lead['fiscal_year_end_yyyymm'] -= 100
-    pair = base.merge(lead, on=['stock_id', 'fiscal_year_end_yyyymm'], how='inner')
-    if winsor_dep:
-        pair = winsorize_by(pair, ['y_lead'], by='est_year')
-
-    rows = []
-    for t, g in pair.groupby('est_year'):
-        X = np.column_stack([np.ones(len(g)), g[X_cols].to_numpy(float)])
-        yv = g['y_lead'].to_numpy(float)
-        n, k = X.shape
-        if n < k + 10:
-            continue
-        b, *_ = np.linalg.lstsq(X, yv, rcond=None)
-        e = yv - X @ b
-        adj_r2 = 1 - (e @ e / (n - k)) / yv.var(dd
-        rows.append({'est_year': t, 'const': b[0], **dict(zip(X_cols, b[1:])),
-                     'adj_r2': adj_r2, 'n': n})
-    return pd.DataFrame(rows).set_index('est_year').sort_index(), X_cols
+# %% 2×3 ソートの分解：小型株の群・大型株の群それぞれの「高 − 低」
+def rmw_legs(sig, rtw, var, bp_mask=None):
+    """2×3 ソートの、小型株の群と大型株の群それぞれのスプレッド（高 − 低）を返す"""
+    s = sig.dropna(subset=[var, 'ME_jun']).copy()
+    s['sz'] = assign_bins(s, 'ME_jun', [0.5], bp_mask)
+    s['vb'] = assign_bins(s, var, [0.3, 0.7], bp_mask)
+    s = s.dropna(subset=['sz', 'vb'])
+    s[['sz', 'vb']] = s[['sz', 'vb']].astype(int)
+    p = rtw.merge(s[['security_code', 'form_year', 'sz', 'vb']], on=['security_code', 'form_year'])
+    R = vw_ret(p, ['sz', 'vb'])
+    return pd.DataFrame({'small': R[(0, 2)] - R[(0, 0)], 'big': R[(1, 2)] - R[(1, 0)]})
 
 
-def add_expected(ch, y, inv, xvars='full', timing=ep=False):
-    """期待収益性 Yhat を作る（timing='safe'：b_τ × X_τ を τ 年7月からのリターンに使う）"""
-    B, X_cols = first_stage(ch, y, inv, xvars, win
-    Bs = (B[['const'] + X_cols].rolling(avg_years, min_periods=1).mean()
-          .add_prefix('b_'))
+SIGNALS = {'exp': 'Yhat', 'expprof': 'Yhat_prof', 'act': None}   # None は実績 Y_t
 
-    base = ch[['security_code', 'fiscal_year_end_y].dropna().copy()
-    base['_fy'] = base['fiscal_year_end_yyyymm'] // 100
-    base = winsorize_by(base, X_cols, by='_fy')
-    shift = 0 if timing == 'safe' else 1
-    base['coef_year'] = base['form_year'] + shift
-    base = base.merge(Bs, left_on='coef_year', right_index=True, how='inner')
-    base['Yhat'] = base['b_const'] + sum(base[f'b_ls)
+legs = {}
+for y in PROF:
+    for lab, var in SIGNALS.items():
+        L = rmw_legs(sigs[y], rtw, var or y)
+        legs[f'{lab}{y}_small'] = L['small']
+        legs[f'{lab}{y}_big'] = L['big']
+legs = align_to_ff(pd.DataFrame(legs), FF)    # French と共通の月にそろえる
 
-    out = base[['security_code', 'coef_year', 'Yhaar': 'form_year'})
-    return out, B
+
+def leg_table(legs, FF, y, model='ff5', nw_lags=12
+    """各シグナルについて、小型・大型それぞれの平均と α、および「小型 − 大型」の差の検定"""
+    base = FACTOR_SETS[model]
+    fmt = lambda e: f"{e.loc['alpha', 'coef'] * 100:.3f} ({e.loc['alpha', 't']:.2f})"
+    rows = {}
+    for lab in SIGNALS:
+        for g in ['small', 'big']:
+            x = legs[f'{lab}{y}_{g}']
+            m, _, n = ts_reg(x, None, nw_lags)
+            a, _, _ = ts_reg(x, FF[base], nw_lags)
+            rows[(lab, g)] = {'平均 (%/月)': fmt(m': fmt(a), '月数': n}
+        d = legs[f'{lab}{y}_small'] - legs[f'{lab}{y}_big']
+        m, _, n = ts_reg(d, None, nw_lags)
+        a, _, _ = ts_reg(d, FF[base], nw_lags)
+        rows[(lab, '小型 − 大型')] = {'平均 (%/月)α (%/月)': fmt(a), '月数': n}
+    return pd.DataFrame(rows).T
+
+
+for y in PROF:
+    # 確認：RMW = ½ × 小型 + ½ × 大型 になっているか（0 に近ければ OK）
+    chk = (0.5 * (legs[f'exp{y}_small'] + legs[f'ey}'].reindex(legs.index)).abs().max()
+    show(f'[規模別の分解] {y}（{MODEL.upper()}）', leg_table(legs, FF, y, MODEL),
+         note=f'期間：{period_info(legs)}。括弧内
+              'small：小型株の群の中での「収益性が高い − 低い」、big：大型株の群の中での同じスプレッド。\n'
+              '「小型 − 大型」の α が有意なら、効  α が有意なら、大型株でも効果がある。\n'
+              f'（確認：RMW_exp{y} と ½(small + big) の最大の差 = {chk:.2e}）')
+
+# 図：期待版と実績版の、小型・大型それぞれの累積リターン
+fig, axes = plt.subplots(1, len(PROF), figsize=(14
+for j, y in enumerate(PROF):
+    for lab, col in [('exp', 'tab:blue'), ('act',
+        for g, ls in [('small', '-'), ('big', '--')]:
+            cum = (1 + legs[f'{lab}{y}_{g}']).cump
+            axes[0, j].plot(cum.index.to_timestamp(), cum.to_numpy(), color=col, ls=ls, label=f'{lab} {g}')
+    axes[0, j].set_yscale('log')
+    axes[0, j].axhline(1, color='gray', lw=0.8)
+    axes[0, j].set_title(f'{y}: high-minus-low witmin()} - {legs.index.max()})')
+    axes[0, j].legend()
+fig.tight_layout(); plt.show()
